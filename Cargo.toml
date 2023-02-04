@@ -1,0 +1,19 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "cybot"
+version = "0.1.0"
+edition = "2021"
+forced-target = "thumbv7em-none-eabihf"
+
+[dependencies]
+# this is important to get embedded alloc to link properly the critical-section-single-core feature must be enabled
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+# export the runtime library that matches the version of the coretex-m library we use
+cortex-m-rt = "0.7"
+# the basic hardware abstraction layer for the tm4c123gh6pm
+tm4c123x-hal = "0.10"
+# for allocating some stuff in memory
+embedded-alloc = "0.5"
+# for optimizing panic and oom handlers in release mode but having breakpoints in debug mode
+cfg-if = "1"
