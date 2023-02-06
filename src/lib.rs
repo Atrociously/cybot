@@ -38,11 +38,18 @@ pub struct CyBot {
     pub oi: OpenInterface,
 }
 
+static mut CYBOT_GUARD: bool = false;
+
 pub fn init() -> CyBot {
+    if unsafe { CYBOT_GUARD } {
+        panic!("Cannot initialize the cybot library more than once!");
+    }
+    unsafe { CYBOT_GUARD = true }
+    let p = tm4c123x_hal::Peripherals::take().expect("unable to aquire peripherals make sure they aren't in use elsewhere");
+
     // initialize the heap available to us
     unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
 
-    let p = tm4c123x_hal::Peripherals::take().unwrap();
     let lcd = Lcd::new(p.GPIO_PORTD, p.GPIO_PORTF, &p.SYSCTL.rcgcgpio);
     let oi = OpenInterface::new(p.UART4);
 
