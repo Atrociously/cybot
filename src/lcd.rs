@@ -5,9 +5,6 @@ use crate::time::SpinTimer;
 const HD_LCD_CLEAR: u8 = 0x01;
 const HD_RETURN_HOME: u8 = 0x02;
 
-pub const LCD_WIDTH: u8 = 20;
-pub const LCD_HEIGHT: u8 = 4;
-pub const LCD_TOTAL_CHARS: u8 = LCD_WIDTH * LCD_HEIGHT;
 const LCD_DDRAM_WRITE: u8 = 0x80;
 #[allow(dead_code)]
 const LCD_CGRAM_WRITE: u8 = 0x40;
@@ -24,6 +21,10 @@ pub struct Lcd {
 }
 
 impl Lcd {
+    pub const LCD_WIDTH: u8 = 20;
+    pub const LCD_HEIGHT: u8 = 4;
+    pub const LCD_TOTAL_CHARS: u8 = Self::LCD_WIDTH * Self::LCD_HEIGHT;
+
     pub(crate) fn new(control: GPIO_PORTD, data: GPIO_PORTF, clocks: &RCGCGPIO) -> Self {
         let mut new = Self { control, data };
         new.init(clocks);
@@ -32,15 +33,15 @@ impl Lcd {
 
     fn init(&mut self, clocks: &RCGCGPIO) {
         clocks.modify(|_, w| w.r3().set_bit().r5().set_bit());
-        self.data.dir.modify(|r, w| unsafe { w.bits(r.bits() | 0x0E) });
-        self.data.den.modify(|r, w| unsafe { w.bits(r.bits() | 0x0E) });
+        self.data.dir.write(|w| unsafe { w.bits(0x1E) });
+        self.data.den.write(|w| unsafe { w.bits(0x1E) });
 
         self.control
             .dir
-            .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN | RS_PIN | RW_PIN) });
+            .write(|w| unsafe { w.bits(EN_PIN | RS_PIN | RW_PIN) });
         self.control
             .den
-            .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN | RS_PIN | RW_PIN) });
+            .write(|w| unsafe { w.bits(EN_PIN | RS_PIN | RW_PIN) });
 
         self.control
             .data
@@ -100,7 +101,7 @@ impl Lcd {
         self.control.data.modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
         self.data
             .data
-            .modify(|r, w| unsafe { w.bits(r.bits() | (nibble & 0x0F) << 1) });
+            .modify(|r, w| unsafe { w.bits(r.bits() | ((nibble & 0x0F) << 1)) });
 
         SpinTimer.wait_micros(20);
         self.control
@@ -129,7 +130,7 @@ impl Lcd {
     }
 
     pub fn set_cursor_pos(&mut self, x: u8, y: u8) {
-        if x >= LCD_WIDTH || y >= LCD_HEIGHT {
+        if x >= Self::LCD_WIDTH || y >= Self::LCD_HEIGHT {
             return;
         }
 
@@ -164,11 +165,6 @@ impl Lcd {
 impl core::fmt::Write for Lcd {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         self.puts(s);
-        Ok(())
-    }
-
-    fn write_char(&mut self, c: char) -> core::fmt::Result {
-        self.putc(c);
         Ok(())
     }
 }

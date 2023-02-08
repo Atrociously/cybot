@@ -29,7 +29,7 @@ mod lcd;
 mod open_interface;
 mod time;
 
-pub use lcd::{Lcd, LCD_HEIGHT, LCD_TOTAL_CHARS, LCD_WIDTH};
+pub use lcd::Lcd;
 pub use open_interface::{charging, distance, OiMode, OpenInterface, Stasis};
 pub use time::SpinTimer;
 
