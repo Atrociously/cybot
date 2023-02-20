@@ -1,6 +1,6 @@
-use tm4c123x_hal::tm4c123x::{sysctl::RCGCGPIO, GPIO_PORTD, GPIO_PORTF};
+use tm4c123x_hal::tm4c123x::{GPIO_PORTD, GPIO_PORTF};
 
-use crate::time::SpinTimer;
+use crate::{time::SpinTimer, CyBot};
 
 const HD_LCD_CLEAR: u8 = 0x01;
 const HD_RETURN_HOME: u8 = 0x02;
@@ -15,24 +15,36 @@ const RW_PIN: u32 = 0x40;
 
 const LINE_ADDRESSES: [u8; 4] = [0x00, 0x40, 0x14, 0x54];
 
-pub struct Lcd {
-    control: GPIO_PORTD,
-    data: GPIO_PORTF,
+static mut LCD: Option<()> = Some(());
+
+pub struct Lcd<'a> {
+    control: &'a GPIO_PORTD,
+    data: &'a GPIO_PORTF,
 }
 
-impl Lcd {
-    pub const LCD_WIDTH: u8 = 20;
-    pub const LCD_HEIGHT: u8 = 4;
-    pub const LCD_TOTAL_CHARS: u8 = Self::LCD_WIDTH * Self::LCD_HEIGHT;
+impl<'a> Lcd<'a> {
+    pub const WIDTH: u8 = 20;
+    pub const HEIGHT: u8 = 4;
+    pub const TOTAL_CHARS: u8 = Self::WIDTH * Self::HEIGHT;
 
-    pub(crate) fn new(control: GPIO_PORTD, data: GPIO_PORTF, clocks: &RCGCGPIO) -> Self {
+    pub fn take(cybot: &'a CyBot) -> Option<Self> {
+        cortex_m::interrupt::free(|_| unsafe { LCD.take() })?;
+
+        let control = &cybot.peripherals.GPIO_PORTD;
+        let data = &cybot.peripherals.GPIO_PORTF;
+
         let mut new = Self { control, data };
-        new.init(clocks);
-        new
+        new.init(cybot);
+        Some(new)
     }
 
-    fn init(&mut self, clocks: &RCGCGPIO) {
-        clocks.modify(|_, w| w.r3().set_bit().r5().set_bit());
+    fn init(&mut self, cybot: &CyBot) {
+        let sysctl = &cybot.peripherals.SYSCTL;
+
+        sysctl
+            .rcgcgpio
+            .modify(|_, w| w.r3().set_bit().r5().set_bit());
+
         self.data.dir.write(|w| unsafe { w.bits(0x1E) });
         self.data.den.write(|w| unsafe { w.bits(0x1E) });
 
@@ -83,7 +95,9 @@ impl Lcd {
     }
 
     fn send_command(&mut self, data: u8) {
-        self.control.data.modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
+        self.control
+            .data
+            .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
         self.control
             .data
             .modify(|r, w| unsafe { w.bits(r.bits() & !(RW_PIN | RS_PIN)) });
@@ -98,7 +112,9 @@ impl Lcd {
 
     fn send_nibble(&mut self, nibble: u8) {
         let nibble: u32 = nibble.into();
-        self.control.data.modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
+        self.control
+            .data
+            .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
         self.data
             .data
             .modify(|r, w| unsafe { w.bits(r.bits() | ((nibble & 0x0F) << 1)) });
@@ -130,7 +146,7 @@ impl Lcd {
     }
 
     pub fn set_cursor_pos(&mut self, x: u8, y: u8) {
-        if x >= Self::LCD_WIDTH || y >= Self::LCD_HEIGHT {
+        if x >= Self::WIDTH || y >= Self::HEIGHT {
             return;
         }
 
@@ -143,7 +159,9 @@ impl Lcd {
             return;
         };
 
-        self.control.data.modify(|r, w| unsafe { w.bits(r.bits() | RS_PIN) });
+        self.control
+            .data
+            .modify(|r, w| unsafe { w.bits(r.bits() | RS_PIN) });
         self.control
             .data
             .modify(|r, w| unsafe { w.bits(r.bits() & !RW_PIN) });
@@ -162,7 +180,7 @@ impl Lcd {
     }
 }
 
-impl core::fmt::Write for Lcd {
+impl<'a> core::fmt::Write for Lcd<'a> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         self.puts(s);
         Ok(())

@@ -3,25 +3,31 @@ use core::ops::Deref;
 use alloc::boxed::Box;
 use tm4c123x_hal::tm4c123x::UART4;
 
-use crate::SpinTimer;
+use crate::{bits::*, CyBot, SpinTimer};
 
 pub mod charging;
-pub mod distance;
 mod mode;
 mod stasis;
 
 pub use mode::OiMode;
 pub use stasis::Stasis;
 
+use crate::measure::{Angle, Distance};
+
 const SENSOR_PACKET_SIZE: usize = 80;
 
-const OI_OPCODE_SENSORS: u8 = 142;
-const OI_SENSOR_PACKET_GROUP100: u8 = 100;
+const OPCODE_START: u8 = 128;
+const OPCODE_FULL: u8 = 132;
+const OPCODE_LEDS: u8 = 139;
+const OPCODE_DRIVE_WHEELS: u8 = 145;
+const OPCODE_SENSORS: u8 = 142;
+const OPCODE_STOP: u8 = 173;
+const SENSOR_PACKET_GROUP100: u8 = 100;
 
-pub struct OpenInterface {
+pub struct OpenInterface<'a> {
     // pointer to state on the heap
     state: Box<State>,
-    uart: UART4,
+    uart: &'a UART4,
 }
 
 #[derive(Debug, Default)]
@@ -82,8 +88,8 @@ pub struct State {
     pub motor_current_side: i16,
 
     // motion sensors
-    pub distance: f32,
-    pub angle: f32,
+    pub distance: Distance,
+    pub angle: Angle,
     pub requested_velocity: i16,
     pub requested_radius: i16,
     pub requested_velocity_left: i16,
@@ -114,7 +120,7 @@ pub struct State {
     pub number_of_stream_packets: u8,
     pub stasis: Stasis,
 
-    // bookeeping
+    // private bookeeping
     prev_distance_left: i16,
     prev_distance_right: i16,
 
@@ -122,27 +128,101 @@ pub struct State {
     prev_angle_right: i16,
 }
 
-impl OpenInterface {
-    pub(crate) fn new(uart: UART4) -> Self {
-        Self {
+static mut OI: Option<()> = Some(());
+
+impl<'a> OpenInterface<'a> {
+    /// Take a new instance of the OpenInterface
+    ///
+    /// Will only return some once, any subsequent calls will return None.
+    pub fn take(cybot: &'a CyBot) -> Option<Self> {
+        cortex_m::interrupt::free(|_| unsafe { OI.take() })?;
+
+        let uart = &cybot.peripherals.UART4;
+        let mut new = Self {
             state: Box::<State>::default(),
             uart,
-        }
+        };
+
+        new.init(cybot);
+        Some(new)
+    }
+
+    pub fn set_leds(&mut self, play: bool, advance: bool, color: u8, intensity: u8) {
+        self.uart_send(OPCODE_LEDS);
+        let info = u8::from(advance) << 3 & u8::from(play) << 2;
+        self.uart_send(info);
+        self.uart_send(color);
+        self.uart_send(intensity);
+    }
+
+    pub fn set_wheels(&mut self, left: i16, right: i16) {
+        // todo allow calibration
+        self.uart_send(OPCODE_DRIVE_WHEELS);
+        self.uart_send((right >> 8) as u8);
+        #[allow(clippy::cast_possible_truncation)]
+        self.uart_send(right as u8);
+        self.uart_send((left >> 8) as u8);
+        #[allow(clippy::cast_possible_truncation)]
+        self.uart_send(left as u8);
     }
 
     pub fn update(&mut self) {
         let mut buf = [0u8; SENSOR_PACKET_SIZE];
 
-        self.uart_send(OI_OPCODE_SENSORS);
-        self.uart_send(OI_SENSOR_PACKET_GROUP100);
+        self.uart_send(OPCODE_SENSORS);
+        self.uart_send(SENSOR_PACKET_GROUP100);
 
-        for i in 0..SENSOR_PACKET_SIZE {
-            buf[i] = self.uart_recieve();
+        for i in buf.iter_mut() {
+            *i = self.uart_recieve();
         }
 
         self.parse_packet(buf);
 
         SpinTimer.wait_millis(25); // reduces UART errors apparently
+    }
+
+    fn init(&mut self, cybot: &CyBot) {
+        self.init_uart(cybot);
+        self.uart_send(OPCODE_START);
+        self.uart_send(OPCODE_FULL);
+        self.set_leds(true, true, 7, 255);
+
+        self.update();
+        self.update(); // update twice to clear the distance measurements
+    }
+
+    fn init_uart(&self, cybot: &CyBot) {
+        let sysctl = &cybot.peripherals.SYSCTL;
+        let gpioc = &cybot.peripherals.GPIO_PORTC;
+
+        // BRD=SYSCLK/((ClkDiv)(BaudRate)), HSE=0 ClkDiv=16, BaudRate=115,200
+        const I_BRD: u32 = 0x08;
+        // Fractional remainder is 0.6805, DIVFRAC = (.6805)(64)+0.5 = 44
+        const F_BRD: u32 = 44;
+
+        //sysctl.rcgcgpio.write(|w| w.r2().set_bit());
+
+        sysctl.rcgcgpio.modify(|_, w| w.r2().set_bit()); // enable GPIO C
+        sysctl.rcgcuart.modify(|_, w| w.r4().set_bit()); // enable UART4
+
+        unsafe {
+            gpioc.afsel.modify(|r, w| w.bits(r.bits() | (BIT4 | BIT5)));
+            gpioc.pctl.modify(|r, w| w.bits(r.bits() | 0x00110000));
+            gpioc.den.modify(|r, w| w.bits(r.bits() | (BIT4 | BIT5)));
+            gpioc.dir.modify(|r, w| w.bits(r.bits() | BIT5));
+            gpioc.dir.modify(|r, w| w.bits(r.bits() & !BIT4));
+        }
+        self.uart.ctl.write(|w| w.uarten().clear_bit()); // disable uart for setup
+        unsafe {
+            self.uart.ibrd.write(|w| w.bits(I_BRD));
+            self.uart.fbrd.write(|w| w.bits(F_BRD));
+        }
+        self.uart.lcrh.write(|w| w.wlen()._8());
+        self.uart.cc.write(|w| w.cs().sysclk());
+        // re-enable uart and Rx / Tx
+        self.uart
+            .ctl
+            .write(|w| w.rxe().set_bit().txe().set_bit().uarten().set_bit());
     }
 
     fn parse_packet(&mut self, packet: [u8; SENSOR_PACKET_SIZE]) {
@@ -215,7 +295,7 @@ impl OpenInterface {
         self.state.bumper_front_right = (packet[56] & 0x10) >> 4 == 1;
         self.state.bumper_center_right = (packet[56] & 0x08) >> 3 == 1;
         self.state.bumper_center_left = (packet[56] & 0x04) >> 2 == 1;
-        self.state.bumper_front_left = packet[56] & 0x02 == 1;
+        self.state.bumper_front_left = (packet[56] & 0x02) >> 1 == 1;
         self.state.bumper_left = packet[56] & 0x01 == 1;
 
         self.state.bumper_signal_left = Self::parse_u16(&packet[57..]);
@@ -236,7 +316,7 @@ impl OpenInterface {
         self.state.stasis = Stasis::from(packet[79]);
 
         self.state.distance = self.get_distance();
-        self.state.angle = self.get_angle_deg();
+        self.state.angle = self.get_angle();
     }
 
     fn parse_u16(packet: &[u8]) -> u16 {
@@ -251,7 +331,7 @@ impl OpenInterface {
         // holds until no data in transmit buffer
         while self.uart.fr.read().txff().bit() {}
 
-        self.uart.dr.write(|w| unsafe { w.bits(data as u32) })
+        self.uart.dr.write(|w| unsafe { w.bits(u32::from(data)) })
     }
 
     fn uart_recieve(&self) -> u8 {
@@ -261,7 +341,7 @@ impl OpenInterface {
         self.uart.dr.read().data().bits()
     }
 
-    fn get_distance(&mut self) -> f32 {
+    fn get_distance(&mut self) -> Distance {
         const MAGIC: f32 = 72.0 * core::f32::consts::PI / 508.8;
 
         let left_diff = self.encoder_count_left - self.prev_distance_left;
@@ -273,10 +353,10 @@ impl OpenInterface {
         self.state.prev_distance_left = self.encoder_count_left;
         self.state.prev_distance_right = self.encoder_count_right;
 
-        return (dist_left + dist_right) / 2.0;
+        Distance::from_mm((dist_left + dist_right) / 2.0)
     }
 
-    fn get_angle_rad(&mut self) -> f32 {
+    fn get_angle(&mut self) -> Angle {
         const MAGIC: f32 = 72.0 * core::f32::consts::PI / 508.8;
 
         let prev_equals_current = self.encoder_count_left == self.prev_angle_left
@@ -286,7 +366,7 @@ impl OpenInterface {
             // happens on first pass or when the robot does not move
             self.state.prev_angle_left = self.encoder_count_left;
             self.state.prev_angle_right = self.encoder_count_right;
-            return 0.0;
+            return Angle::from_rad(0.0);
         }
         let left_diff = self.encoder_count_left - self.prev_angle_left;
         let right_diff = self.encoder_count_right - self.prev_angle_right;
@@ -296,18 +376,22 @@ impl OpenInterface {
         self.state.prev_angle_left = self.encoder_count_left;
         self.state.prev_angle_right = self.encoder_count_right;
 
-        (dist_right - dist_left) / 235.0
-    }
-
-    fn get_angle_deg(&mut self) -> f32 {
-        self.get_angle_rad() * 180.0 / core::f32::consts::PI
+        Angle::from_rad((dist_right - dist_left) / 235.0)
     }
 }
 
-impl Deref for OpenInterface {
+impl Deref for OpenInterface<'_> {
     type Target = State;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         self.state.deref()
+    }
+}
+
+impl Drop for OpenInterface<'_> {
+    fn drop(&mut self) {
+        self.set_wheels(0, 0);
+        self.uart_send(OPCODE_STOP);
     }
 }
