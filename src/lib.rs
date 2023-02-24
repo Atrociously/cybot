@@ -1,6 +1,18 @@
 //! Abstraction for the ISU CyBot Platform
 //!
 //! Provides easy to use abstractions for many of the features of the CyBot Platform.
+//!
+//! ## Hello World Example
+//! ```notest
+//! use core::fmt::Write;
+//! use cybot::{entry, CyBot, Lcd};
+//!
+//! #[entry]
+//! fn main(cybot: &Cybot) {
+//!     let lcd = &mut Lcd::take(cybot).unwrap();
+//!     write!(lcd, "Hello, World!").unwrap();
+//! }
+//! ```
 
 #![feature(alloc_error_handler)]
 #![deny(
@@ -70,6 +82,10 @@ fn init() -> CyBot {
     CyBot { core, peripherals }
 }
 
+/// Initializes the cybot and runs the given function
+///
+/// This is designed such that unless the given function panics all
+/// values owned by this function will be dropped before the program ends
 pub fn run<T, F: FnOnce(&CyBot) -> T>(f: F) -> ! {
     let cybot = init();
     // this ensures that any variables created within

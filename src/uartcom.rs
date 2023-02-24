@@ -10,6 +10,9 @@ pub struct UartCom<'a> {
 static mut UARTCOM: Option<()> = Some(());
 
 impl<'a> UartCom<'a> {
+    /// Initializes and takes the instance of the uart communicator
+    ///
+    /// Guaranteed to return Some on the first call, all subsequent calls return None
     pub fn take(cybot: &'a CyBot) -> Option<Self> {
         cortex_m::interrupt::free(|_| unsafe { UARTCOM.take() })?;
 
@@ -61,6 +64,7 @@ impl<'a> UartCom<'a> {
         self.uart.dr.read().data().bits()
     }
 
+    /// Put a char to the uart communication
     pub fn putc(&self, data: char) {
         let mut buf = [0; MAX_UNICODE_CHAR];
         data.encode_utf8(&mut buf);
@@ -70,12 +74,14 @@ impl<'a> UartCom<'a> {
         }
     }
 
+    /// Put a string to the uart communication
     pub fn puts(&self, data: &str) {
         for ch in data.chars() {
             self.putc(ch);
         }
     }
 
+    /// Wait for a char from the uart
     pub fn getc(&self) -> Option<char> {
         let next = self.uart_recieve();
         if next.is_ascii() {

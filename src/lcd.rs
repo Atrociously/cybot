@@ -27,6 +27,9 @@ impl<'a> Lcd<'a> {
     pub const HEIGHT: u8 = 4;
     pub const TOTAL_CHARS: u8 = Self::WIDTH * Self::HEIGHT;
 
+    /// Initialize and take the lcd instance
+    ///
+    /// Guaranteed to return Some on first call, all subsequent calls return None
     pub fn take(cybot: &'a CyBot) -> Option<Self> {
         cortex_m::interrupt::free(|_| unsafe { LCD.take() })?;
 
@@ -130,21 +133,35 @@ impl<'a> Lcd<'a> {
             .modify(|r, w| unsafe { w.bits(r.bits() & !(0x0F << 1)) });
     }
 
+    /// Clear the lcd screen
+    ///
+    /// Also returns the cursor
     pub fn clear(&mut self) {
         self.send_command(HD_LCD_CLEAR);
         SpinTimer.wait_millis(2);
     }
 
+    /// Return the cursor home without clearing
     pub fn home(&mut self) {
         self.send_command(HD_RETURN_HOME);
     }
 
+    /// Go to a specific line in the lcd
+    ///
+    /// lines are zero indexed so the first line is line 0
+    /// there are 4 total lines so the max value is 3
     pub fn goto_line(&mut self, line: u8) {
         let line: usize = line.into();
         let line = 0x03 & (line - 1);
         self.send_command(LCD_DDRAM_WRITE | LINE_ADDRESSES[line]);
     }
 
+
+    /// Set the exact x and y value of the cursor
+    ///
+    /// x must be less than [`Self::WIDTH`]
+    /// y must be less than [`Self::HEIGHT`]
+    /// the function will do nothing if your bounds are incorrect
     pub fn set_cursor_pos(&mut self, x: u8, y: u8) {
         if x >= Self::WIDTH || y >= Self::HEIGHT {
             return;
@@ -154,6 +171,12 @@ impl<'a> Lcd<'a> {
         self.send_command(0x80 | index);
     }
 
+
+    /// Put a character on the lcd screen
+    ///
+    /// Will put the given char onto the lcd
+    /// the char must be encodable as a u8
+    /// if it is not the function will do nothing.
     pub fn putc(&mut self, data: char) {
         let Ok(data) = u8::try_from(data) else {
             return;
@@ -173,6 +196,9 @@ impl<'a> Lcd<'a> {
         // TODO: Poll busy flag
     }
 
+    /// Put a string onto the lcd screen
+    ///
+    /// Every char in the string must be encodable as a u8
     pub fn puts(&mut self, data: &str) {
         for ch in data.chars() {
             self.putc(ch);

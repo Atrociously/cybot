@@ -131,9 +131,9 @@ pub struct State {
 static mut OI: Option<()> = Some(());
 
 impl<'a> OpenInterface<'a> {
-    /// Take a new instance of the OpenInterface
+    /// Initialize and take the instance of the OpenInterface
     ///
-    /// Will only return some once, any subsequent calls will return None.
+    /// Guaranteed to return Some on first call, any subsequent calls will return None.
     pub fn take(cybot: &'a CyBot) -> Option<Self> {
         cortex_m::interrupt::free(|_| unsafe { OI.take() })?;
 
@@ -147,6 +147,7 @@ impl<'a> OpenInterface<'a> {
         Some(new)
     }
 
+    /// Set the leds on the iRobot
     pub fn set_leds(&mut self, play: bool, advance: bool, color: u8, intensity: u8) {
         self.uart_send(OPCODE_LEDS);
         let info = u8::from(advance) << 3 & u8::from(play) << 2;
@@ -155,6 +156,10 @@ impl<'a> OpenInterface<'a> {
         self.uart_send(intensity);
     }
 
+    /// Set the wheels to a given speed
+    ///
+    /// Positive is forwards
+    /// Negative is backwards
     pub fn set_wheels(&mut self, left: i16, right: i16) {
         // todo allow calibration
         self.uart_send(OPCODE_DRIVE_WHEELS);
@@ -166,6 +171,9 @@ impl<'a> OpenInterface<'a> {
         self.uart_send(left as u8);
     }
 
+    /// Update the OpenInterface state from the iRobot
+    ///
+    /// Ensures that values within the state change to match iRobot reports.
     pub fn update(&mut self) {
         let mut buf = [0u8; SENSOR_PACKET_SIZE];
 

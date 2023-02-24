@@ -11,7 +11,7 @@ impl Source {
     }
 
     pub fn home(self) -> bool {
-        self.0 & Self::HOME.0 >> 1 == 1
+        (self.0 & Self::HOME.0) >> 1 == 1
     }
 }
 

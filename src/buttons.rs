@@ -31,6 +31,9 @@ pub struct ButtonManager<'a> {
 static mut BTNMGR: Option<()> = Some(());
 
 impl<'a> ButtonManager<'a> {
+    /// Initialize and take the button manager instance
+    ///
+    /// Guaranteed to return Some on first call, all subsequent calls return None
     pub fn take(cybot: &'a CyBot) -> Option<Self> {
         // ensure only one button manager can be created
         cortex_m::interrupt::free(|_| unsafe { BTNMGR.take() })?;
@@ -49,6 +52,10 @@ impl<'a> ButtonManager<'a> {
         Some(Self { gpio })
     }
 
+    /// Get the current state of the buttons
+    ///
+    /// Does not wait for a button to be pressed
+    /// just returns the current state.
     pub fn get_buttons(&self) -> Buttons {
         let data = self.gpio.data.read().bits();
         let data: u8 = (data & BTN_PINS).try_into().unwrap();
@@ -56,6 +63,9 @@ impl<'a> ButtonManager<'a> {
         Buttons(!data & 0x0F)
     }
 
+    /// Wait for a specific button or buttons to be pressed
+    ///
+    /// Returns the state when the button was pressed
     pub fn wait_buttons(&self, btn: Buttons) -> Buttons {
         let mut status = self.get_buttons();
         while status & btn == Buttons::NONE {
