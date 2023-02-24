@@ -63,14 +63,22 @@ impl<'a> Scanner<'a> {
         self.extents.right = extent;
     }
 
+    /// Returns the current left and right extents
     pub fn get_extents(&self) -> Extent {
         self.extents
     }
 
+    /// Run the calibration program to set left and right extents manually
+    ///
+    /// If you want to get the new extents use [`get_extents`]
     pub fn run_calibration(&mut self) {
         todo!()
     }
 
+    /// Scan at the given angle with the provided ScanOptions
+    /// 
+    /// If the motor is not enabled the scan will still happen
+    /// but the motor will not move to the specified angle
     pub fn scan(&mut self, angle: Angle, opts: ScanOptions) -> ScanResult {
         todo!()
     }

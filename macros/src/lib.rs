@@ -14,9 +14,10 @@ pub fn entry(_attr: TokenStream, item: TokenStream) -> TokenStream {
     quote! {
         #item
 
+        #[allow(non_snake_case)]
         #[cybot::cortex_m_rt::entry]
         fn #wrap_ident() -> ! {
-            cybot::run(#fn_ident)
+            ::cybot::run(#fn_ident)
         }
     }.into()
 }
