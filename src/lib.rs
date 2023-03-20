@@ -14,7 +14,7 @@
 //! }
 //! ```
 
-#![feature(alloc_error_handler)]
+#![feature(once_cell)]
 #![deny(
     clippy::cast_lossless,
     clippy::cast_possible_wrap,
@@ -22,26 +22,33 @@
 )]
 #![no_std]
 
-extern crate alloc;
+//extern crate alloc;
 pub extern crate libm;
+
+pub use tm4c123x_hal as hal;
+pub use hal::tm4c123x as cpu;
+use cpu::{GPIO_PORTB, GPIO_PORTD, GPIO_PORTE, GPIO_PORTF, SYSCTL, UART1, UART4, GPIO_PORTC};
 
 pub extern crate cortex_m;
 pub extern crate cortex_m_rt;
-pub use cybot_macros::entry;
+use cortex_m::{interrupt::Mutex, peripheral::NVIC};
+pub use cortex_m_rt::entry;
 
 use cfg_if::cfg_if;
-use tm4c123x_hal::{CorePeripherals, Peripherals};
 
-use alloc::alloc::Layout;
-use core::mem::MaybeUninit;
+//use alloc::alloc::Layout;
+//use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
+use util::{CriticalCell, CriticalOnce};
 
-use embedded_alloc::Heap;
+//use embedded_alloc::Heap;
 
-#[global_allocator]
-static HEAP: Heap = Heap::empty();
-const HEAP_SIZE: usize = 4096;
-static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+mod util;
+
+//#[global_allocator]
+//static HEAP: Heap = Heap::empty();
+//const HEAP_SIZE: usize = 4096;
+//static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
 mod bits;
 mod buttons;
@@ -60,42 +67,45 @@ pub use scanner::{ScanOptions, ScanResult, Scanner};
 pub use time::SpinTimer;
 pub use uartcom::UartCom;
 
+static CYBOT: CriticalOnce<CyBot> = CriticalOnce::new();
+
 pub struct CyBot {
-    #[allow(dead_code)]
-    pub(crate) core: CorePeripherals,
-    pub(crate) peripherals: Peripherals,
+    pub(crate) uart1: Mutex<UART1>,
+    pub(crate) uart4: Mutex<UART4>,
+    pub(crate) gpiob: Mutex<GPIO_PORTB>,
+    pub(crate) gpiod: Mutex<GPIO_PORTD>,
+    pub(crate) gpioc: Mutex<GPIO_PORTC>,
+    pub(crate) gpioe: Mutex<GPIO_PORTE>,
+    pub(crate) gpiof: Mutex<GPIO_PORTF>,
+    pub(crate) sysctl: Mutex<SYSCTL>,
+    pub(crate) nvic: CriticalCell<NVIC>, // allow mutability within critical sections
 }
 
-static mut CYBOT: Option<()> = Some(());
+fn get_cybot() -> &'static CyBot {
+    cortex_m::interrupt::free(|cs| {
+        CYBOT.get_or_init(cs, || {
+            // initialize heap once
+            //unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+            
 
-fn init() -> CyBot {
-    cortex_m::interrupt::free(|_| unsafe { CYBOT.take() })
-        .expect("Cannot initialize the cybot library more than once!");
-    let core = tm4c123x_hal::CorePeripherals::take()
-        .expect("unable to aquire core peripherals make sure they aren't in use elsewhere");
-    let peripherals = tm4c123x_hal::Peripherals::take()
-        .expect("unable to aquire peripherals make sure they aren't in use elsewhere");
+            let core = hal::CorePeripherals::take().unwrap();
+            let perp = hal::Peripherals::take().unwrap();
 
-    // initialize the heap available to us
-    unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
-
-    CyBot { core, peripherals }
+            CyBot {
+                uart1: Mutex::new(perp.UART1),
+                uart4: Mutex::new(perp.UART4),
+                gpiob: Mutex::new(perp.GPIO_PORTB),
+                gpiod: Mutex::new(perp.GPIO_PORTD),
+                gpioc: Mutex::new(perp.GPIO_PORTC),
+                gpioe: Mutex::new(perp.GPIO_PORTE),
+                gpiof: Mutex::new(perp.GPIO_PORTF),
+                sysctl: Mutex::new(perp.SYSCTL),
+                nvic: CriticalCell::new(core.NVIC),
+            }
+        })
+    })
 }
-
-/// Initializes the cybot and runs the given function
-///
-/// This is designed such that unless the given function panics all
-/// values owned by this function will be dropped before the program ends
-pub fn run<T, F: FnOnce(&CyBot) -> T>(f: F) -> ! {
-    let cybot = init();
-    // this ensures that any variables created within
-    // the scope of the function are dropped
-    f(&cybot);
-
-    // once program has completed we are finished
-    panic!("complete")
-}
-
+/*
 #[alloc_error_handler]
 #[allow(clippy::empty_loop)]
 fn oom(_: Layout) -> ! {
@@ -108,6 +118,7 @@ fn oom(_: Layout) -> ! {
         }
     }
 }
+*/
 
 #[panic_handler]
 fn panic(_: &PanicInfo) -> ! {

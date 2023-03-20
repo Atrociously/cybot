@@ -28,7 +28,7 @@ impl Distance {
     }
 
     pub fn as_nm(&self) -> f32 {
-       self.cm * 1e7
+        self.cm * 1e7
     }
 
     pub fn magnitude(&self) -> Self {

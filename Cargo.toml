@@ -3,11 +3,7 @@ name = "cybot"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
-members = ["macros"]
-
 [dependencies]
-cybot-macros = { path = "./macros" }
 # this is important to get embedded alloc to link properly the critical-section-single-core feature must be enabled
 cortex-m = { version = "0.6" } #features = ["critical-section-single-core"] }
 # export the runtime library that matches the version of the coretex-m library we use

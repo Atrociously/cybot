@@ -1,6 +1,6 @@
-use tm4c123x_hal::tm4c123x::{GPIO_PORTD, GPIO_PORTF};
+use cortex_m::interrupt::CriticalSection;
 
-use crate::{time::SpinTimer, CyBot};
+use crate::{get_cybot, time::SpinTimer};
 
 const HD_LCD_CLEAR: u8 = 0x01;
 const HD_RETURN_HOME: u8 = 0x02;
@@ -15,14 +15,11 @@ const RW_PIN: u32 = 0x40;
 
 const LINE_ADDRESSES: [u8; 4] = [0x00, 0x40, 0x14, 0x54];
 
-static mut LCD: Option<()> = Some(());
+static mut LCD: Option<Lcd> = Some(Lcd(()));
 
-pub struct Lcd<'a> {
-    control: &'a GPIO_PORTD,
-    data: &'a GPIO_PORTF,
-}
+pub struct Lcd(());
 
-impl<'a> Lcd<'a> {
+impl Lcd {
     pub const WIDTH: u8 = 20;
     pub const HEIGHT: u8 = 4;
     pub const TOTAL_CHARS: u8 = Self::WIDTH * Self::HEIGHT;
@@ -30,35 +27,37 @@ impl<'a> Lcd<'a> {
     /// Initialize and take the lcd instance
     ///
     /// Guaranteed to return Some on first call, all subsequent calls return None
-    pub fn take(cybot: &'a CyBot) -> Option<Self> {
-        cortex_m::interrupt::free(|_| unsafe { LCD.take() })?;
+    pub fn take() -> Option<Self> {
+        let mut lcd = cortex_m::interrupt::free(|_| unsafe { LCD.take() })?;
 
-        let control = &cybot.peripherals.GPIO_PORTD;
-        let data = &cybot.peripherals.GPIO_PORTF;
-
-        let mut new = Self { control, data };
-        new.init(cybot);
-        Some(new)
+        cortex_m::interrupt::free(|cs| {
+            lcd.init(cs);
+        });
+        Some(lcd)
     }
 
-    fn init(&mut self, cybot: &CyBot) {
-        let sysctl = &cybot.peripherals.SYSCTL;
+    fn init(&mut self, cs: &CriticalSection) {
+        let cybot = get_cybot();
+
+        let sysctl = cybot.sysctl.borrow(cs);
+        let control = cybot.gpiod.borrow(cs);
+        let data = cybot.gpiof.borrow(cs);
 
         sysctl
             .rcgcgpio
             .modify(|_, w| w.r3().set_bit().r5().set_bit());
 
-        self.data.dir.write(|w| unsafe { w.bits(0x1E) });
-        self.data.den.write(|w| unsafe { w.bits(0x1E) });
+        data.dir.write(|w| unsafe { w.bits(0x1E) });
+        data.den.write(|w| unsafe { w.bits(0x1E) });
 
-        self.control
+        control
             .dir
             .write(|w| unsafe { w.bits(EN_PIN | RS_PIN | RW_PIN) });
-        self.control
+        control
             .den
             .write(|w| unsafe { w.bits(EN_PIN | RS_PIN | RW_PIN) });
 
-        self.control
+        control
             .data
             .write_with_zero(|w| unsafe { w.bits(!(EN_PIN | RW_PIN | RS_PIN)) });
 
@@ -98,12 +97,16 @@ impl<'a> Lcd<'a> {
     }
 
     fn send_command(&mut self, data: u8) {
-        self.control
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
-        self.control
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() & !(RW_PIN | RS_PIN)) });
+        cortex_m::interrupt::free(|cs| {
+            let cybot = get_cybot();
+            let control = cybot.gpiod.borrow(cs);
+            control
+                .data
+                .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
+            control
+                .data
+                .modify(|r, w| unsafe { w.bits(r.bits() & !(RW_PIN | RS_PIN)) });
+        });
 
         self.send_nibble(data >> 4);
         SpinTimer.wait_micros(1);
@@ -115,22 +118,26 @@ impl<'a> Lcd<'a> {
 
     fn send_nibble(&mut self, nibble: u8) {
         let nibble: u32 = nibble.into();
-        self.control
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
-        self.data
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() | ((nibble & 0x0F) << 1)) });
 
-        SpinTimer.wait_micros(20);
-        self.control
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() & !EN_PIN) });
-        SpinTimer.wait_micros(20);
+        cortex_m::interrupt::free(|cs| {
+            let cybot = get_cybot();
+            let control = cybot.gpiod.borrow(cs);
+            let data = cybot.gpiof.borrow(cs);
+            control
+                .data
+                .modify(|r, w| unsafe { w.bits(r.bits() | EN_PIN) });
+            data.data
+                .modify(|r, w| unsafe { w.bits(r.bits() | ((nibble & 0x0F) << 1)) });
 
-        self.data
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() & !(0x0F << 1)) });
+            SpinTimer.wait_micros(20);
+            control
+                .data
+                .modify(|r, w| unsafe { w.bits(r.bits() & !EN_PIN) });
+            SpinTimer.wait_micros(20);
+
+            data.data
+                .modify(|r, w| unsafe { w.bits(r.bits() & !(0x0F << 1)) });
+        });
     }
 
     /// Clear the lcd screen
@@ -156,7 +163,6 @@ impl<'a> Lcd<'a> {
         self.send_command(LCD_DDRAM_WRITE | LINE_ADDRESSES[line]);
     }
 
-
     /// Set the exact x and y value of the cursor
     ///
     /// x must be less than [`Self::WIDTH`]
@@ -171,7 +177,6 @@ impl<'a> Lcd<'a> {
         self.send_command(0x80 | index);
     }
 
-
     /// Put a character on the lcd screen
     ///
     /// Will put the given char onto the lcd
@@ -182,12 +187,15 @@ impl<'a> Lcd<'a> {
             return;
         };
 
-        self.control
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() | RS_PIN) });
-        self.control
-            .data
-            .modify(|r, w| unsafe { w.bits(r.bits() & !RW_PIN) });
+        cortex_m::interrupt::free(|cs| {
+            let control = get_cybot().gpiod.borrow(cs);
+            control
+                .data
+                .modify(|r, w| unsafe { w.bits(r.bits() | RS_PIN) });
+            control
+                .data
+                .modify(|r, w| unsafe { w.bits(r.bits() & !RW_PIN) });
+        });
 
         self.send_nibble(data >> 4);
         SpinTimer.wait_micros(43);
@@ -206,7 +214,7 @@ impl<'a> Lcd<'a> {
     }
 }
 
-impl<'a> core::fmt::Write for Lcd<'a> {
+impl core::fmt::Write for Lcd {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         self.puts(s);
         Ok(())

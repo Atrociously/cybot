@@ -1,9 +1,8 @@
 use core::ops::Deref;
 
-use alloc::boxed::Box;
-use tm4c123x_hal::tm4c123x::UART4;
+use cortex_m::interrupt::CriticalSection;
 
-use crate::{bits::*, CyBot, SpinTimer};
+use crate::{bits::*, SpinTimer, get_cybot};
 
 pub mod charging;
 mod mode;
@@ -24,10 +23,9 @@ const OPCODE_SENSORS: u8 = 142;
 const OPCODE_STOP: u8 = 173;
 const SENSOR_PACKET_GROUP100: u8 = 100;
 
-pub struct OpenInterface<'a> {
-    // pointer to state on the heap
-    state: Box<State>,
-    uart: &'a UART4,
+pub struct OpenInterface {
+    // pointer to state on the heap // not on heap anymore dependencies suck
+    state: State,
 }
 
 #[derive(Debug, Default)]
@@ -130,20 +128,18 @@ pub struct State {
 
 static mut OI: Option<()> = Some(());
 
-impl<'a> OpenInterface<'a> {
+impl OpenInterface {
     /// Initialize and take the instance of the OpenInterface
     ///
     /// Guaranteed to return Some on first call, any subsequent calls will return None.
-    pub fn take(cybot: &'a CyBot) -> Option<Self> {
+    pub fn take() -> Option<Self> {
         cortex_m::interrupt::free(|_| unsafe { OI.take() })?;
 
-        let uart = &cybot.peripherals.UART4;
         let mut new = Self {
-            state: Box::<State>::default(),
-            uart,
+            state: State::default(),
         };
 
-        new.init(cybot);
+        cortex_m::interrupt::free(|cs| new.init(cs));
         Some(new)
     }
 
@@ -189,8 +185,8 @@ impl<'a> OpenInterface<'a> {
         SpinTimer.wait_millis(25); // reduces UART errors apparently
     }
 
-    fn init(&mut self, cybot: &CyBot) {
-        self.init_uart(cybot);
+    fn init(&mut self, cs: &CriticalSection) {
+        self.init_uart(cs);
         self.uart_send(OPCODE_START);
         self.uart_send(OPCODE_FULL);
         self.set_leds(true, true, 7, 255);
@@ -199,9 +195,11 @@ impl<'a> OpenInterface<'a> {
         self.update(); // update twice to clear the distance measurements
     }
 
-    fn init_uart(&self, cybot: &CyBot) {
-        let sysctl = &cybot.peripherals.SYSCTL;
-        let gpioc = &cybot.peripherals.GPIO_PORTC;
+    fn init_uart(&self, cs: &CriticalSection) {
+        let cybot = get_cybot();
+        let sysctl = cybot.sysctl.borrow(cs);
+        let gpioc = cybot.gpioc.borrow(cs);
+        let uart = cybot.uart4.borrow(cs);
 
         // BRD=SYSCLK/((ClkDiv)(BaudRate)), HSE=0 ClkDiv=16, BaudRate=115,200
         const I_BRD: u32 = 0x08;
@@ -220,15 +218,15 @@ impl<'a> OpenInterface<'a> {
             gpioc.dir.modify(|r, w| w.bits(r.bits() | BIT5));
             gpioc.dir.modify(|r, w| w.bits(r.bits() & !BIT4));
         }
-        self.uart.ctl.write(|w| w.uarten().clear_bit()); // disable uart for setup
+        uart.ctl.write(|w| w.uarten().clear_bit()); // disable uart for setup
         unsafe {
-            self.uart.ibrd.write(|w| w.bits(I_BRD));
-            self.uart.fbrd.write(|w| w.bits(F_BRD));
+            uart.ibrd.write(|w| w.bits(I_BRD));
+            uart.fbrd.write(|w| w.bits(F_BRD));
         }
-        self.uart.lcrh.write(|w| w.wlen()._8());
-        self.uart.cc.write(|w| w.cs().sysclk());
+        uart.lcrh.write(|w| w.wlen()._8());
+        uart.cc.write(|w| w.cs().sysclk());
         // re-enable uart and Rx / Tx
-        self.uart
+        uart
             .ctl
             .write(|w| w.rxe().set_bit().txe().set_bit().uarten().set_bit());
     }
@@ -336,17 +334,23 @@ impl<'a> OpenInterface<'a> {
     }
 
     fn uart_send(&self, data: u8) {
-        // holds until no data in transmit buffer
-        while self.uart.fr.read().txff().bit() {}
+        cortex_m::interrupt::free(|cs| {
+            let uart = get_cybot().uart4.borrow(cs);
+            // holds until no data in transmit buffer
+            while uart.fr.read().txff().bit() {}
 
-        self.uart.dr.write(|w| unsafe { w.bits(u32::from(data)) })
+            uart.dr.write(|w| unsafe { w.bits(u32::from(data)) })
+        });
     }
 
     fn uart_recieve(&self) -> u8 {
-        // hold until data is recieved
-        while self.uart.fr.read().rxfe().bit() {}
+        cortex_m::interrupt::free(|cs| {
+            let uart = get_cybot().uart4.borrow(cs);
+            // hold until data is recieved
+            while uart.fr.read().rxfe().bit() {}
 
-        self.uart.dr.read().data().bits()
+            uart.dr.read().data().bits()
+        })
     }
 
     fn get_distance(&mut self) -> Distance {
@@ -388,16 +392,16 @@ impl<'a> OpenInterface<'a> {
     }
 }
 
-impl Deref for OpenInterface<'_> {
+impl Deref for OpenInterface {
     type Target = State;
 
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.state.deref()
+        &self.state
     }
 }
 
-impl Drop for OpenInterface<'_> {
+impl Drop for OpenInterface {
     fn drop(&mut self) {
         self.set_wheels(0, 0);
         self.uart_send(OPCODE_STOP);

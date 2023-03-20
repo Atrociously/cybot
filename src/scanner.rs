@@ -1,6 +1,7 @@
-use tm4c123x_hal::tm4c123x::GPIO_PORTB;
-
-use crate::{measure::Angle, CyBot};
+use crate::{
+    get_cybot,
+    measure::{Angle, Distance},
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ScanResult {
@@ -21,32 +22,32 @@ pub struct Extent {
     right: u32,
 }
 
-pub struct Scanner<'a> {
-    gpio: &'a GPIO_PORTB,
+pub struct Scanner {
     extents: Extent,
     // TODO: fill out
 }
 
-static mut SCANNER: Option<()> = Some(());
+static mut SCANNER: Option<Scanner> = Some(Scanner {
+    extents: Extent {
+        left: 2_000_000,
+        right: 300_000,
+    },
+});
 
-impl<'a> Scanner<'a> {
-    pub fn take(cybot: &'a CyBot) -> Option<Self> {
-        cortex_m::interrupt::free(|_| unsafe { SCANNER.take() })?;
+impl Scanner {
+    pub fn take() -> Option<Self> {
+        let cybot = get_cybot();
+        let scanner = cortex_m::interrupt::free(|_| unsafe { SCANNER.take() })?;
 
-        let sysctl = &cybot.peripherals.SYSCTL;
-        let gpio = &cybot.peripherals.GPIO_PORTB;
+        cortex_m::interrupt::free(|cs| {
+            let sysctl = cybot.sysctl.borrow(cs);
+            //let gpiob = cybot.gpiob.borrow(cs);
 
-        sysctl.rcgcgpio.modify(|_, w| w.r1().set_bit()); // enable clocks for port b
+            sysctl.rcgcgpio.modify(|_, w| w.r1().set_bit()); // enable clocks for port but
 
-        // TODO: complete scanner setup
-
-        Some(Self {
-            gpio,
-            extents: Extent {
-                left: 2_000_000,
-                right: 300_000,
-            },
-        })
+            // TODO: complete scanner setup
+        });
+        Some(scanner)
     }
 
     /// Set the left extent
@@ -76,10 +77,25 @@ impl<'a> Scanner<'a> {
     }
 
     /// Scan at the given angle with the provided ScanOptions
-    /// 
+    ///
     /// If the motor is not enabled the scan will still happen
     /// but the motor will not move to the specified angle
     pub fn scan(&mut self, angle: Angle, opts: ScanOptions) -> ScanResult {
-        todo!()
+        todo!("{angle:?} {opts:?}")
     }
+}
+
+#[allow(dead_code)]
+fn convert_ir(raw: i32) -> Option<Distance> {
+    let raw: f32 = raw as f32;
+    let voltage_range = 0.4..2.6;
+    let input_range = 650.0..3235.0;
+
+    if !input_range.contains(&raw) {
+        return None;
+    }
+    let conversion =
+        (voltage_range.end - voltage_range.start) / (input_range.end - input_range.start);
+    let _voltage_val = voltage_range.start + conversion * (raw - input_range.start);
+    None
 }
