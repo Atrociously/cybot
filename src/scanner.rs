@@ -1,3 +1,11 @@
+use core::ops::RangeInclusive;
+
+mod infrared;
+mod ping;
+
+pub use infrared::IrSensor;
+pub use ping::Ping;
+
 use crate::{
     get_cybot,
     measure::{Angle, Distance},
@@ -87,15 +95,37 @@ impl Scanner {
 
 #[allow(dead_code)]
 fn convert_ir(raw: i32) -> Option<Distance> {
-    let raw: f32 = raw as f32;
-    let voltage_range = 0.4..2.6;
-    let input_range = 650.0..3235.0;
+    const INPUT_RANGE: RangeInclusive<f32> = 0.0..=4096.0;
+    const VOLTAGE_RANGE: RangeInclusive<f32> = 0.0..=3.3;
+    const INPUT_VOLTAGE_RANGE: RangeInclusive<f32> = 0.4..=2.6;
+    const INV_DIST_RANGE: RangeInclusive<f32> = 0.012..=0.111;
 
-    if !input_range.contains(&raw) {
+    // if the raw data does not fit in an i16 it is out of range anyways
+    let raw = i16::try_from(raw).ok()?;
+    let raw: f32 = f32::from(raw);
+
+    fn convert_value(v: f32, input: &RangeInclusive<f32>, output: &RangeInclusive<f32>) -> f32 {
+        let factor = (output.end() - output.start()) / (input.end() - input.start());
+        output.start() + factor * (v - input.start())
+    }
+
+    // if the value is outside the valid input range
+    // we cannot compute a proper value so abort
+    if !INPUT_RANGE.contains(&raw) {
         return None;
     }
-    let conversion =
-        (voltage_range.end - voltage_range.start) / (input_range.end - input_range.start);
-    let _voltage_val = voltage_range.start + conversion * (raw - input_range.start);
-    None
+
+    let voltage_val = convert_value(raw, &INPUT_RANGE, &VOLTAGE_RANGE);
+
+    // if the voltage is outside the valid input range of the sensor
+    // we cannot compute a proper value, or the data is out of range
+    // anyways so abort
+    if !INPUT_VOLTAGE_RANGE.contains(&voltage_val) {
+        return None;
+    }
+
+    let inv_dist_val = convert_value(voltage_val, &INPUT_VOLTAGE_RANGE, &INV_DIST_RANGE);
+
+    let distance = inv_dist_val.recip() - 0.42;
+    Some(Distance::from_cm(distance))
 }

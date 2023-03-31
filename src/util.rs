@@ -32,6 +32,14 @@ impl<T> CriticalCell<T> {
     }
 }
 
+impl<T: Clone> CriticalCell<T> {
+    pub fn read(&self) -> T {
+        cortex_m::interrupt::free(|cs| {
+            self.borrow(cs).clone()
+        })
+    }
+}
+
 pub struct CriticalOnce<T> {
     inner: OnceCell<T>,
 }

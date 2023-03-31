@@ -211,6 +211,10 @@ impl OpenInterface {
         sysctl.rcgcgpio.modify(|_, w| w.r2().set_bit()); // enable GPIO C
         sysctl.rcgcuart.modify(|_, w| w.r4().set_bit()); // enable UART4
 
+        // wait for ready
+        while sysctl.prgpio.read().r2().bit_is_clear() {}
+        while sysctl.pruart.read().r4().bit_is_clear() {}
+
         unsafe {
             gpioc.afsel.modify(|r, w| w.bits(r.bits() | (BIT4 | BIT5)));
             gpioc.pctl.modify(|r, w| w.bits(r.bits() | 0x00110000));

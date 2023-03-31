@@ -25,9 +25,10 @@
 //extern crate alloc;
 pub extern crate libm;
 
+use hal::tm4c123x::TIMER3;
 pub use tm4c123x_hal as hal;
 pub use hal::tm4c123x as cpu;
-use cpu::{GPIO_PORTB, GPIO_PORTD, GPIO_PORTE, GPIO_PORTF, SYSCTL, UART1, UART4, GPIO_PORTC};
+use cpu::{ADC0, GPIO_PORTB, GPIO_PORTD, GPIO_PORTE, GPIO_PORTF, SYSCTL, UART1, UART4, GPIO_PORTC};
 
 pub extern crate cortex_m;
 pub extern crate cortex_m_rt;
@@ -63,13 +64,15 @@ pub mod measure;
 pub use buttons::{ButtonManager, Buttons};
 pub use lcd::Lcd;
 pub use open_interface::{charging, OiMode, OpenInterface, Stasis};
-pub use scanner::{ScanOptions, ScanResult, Scanner};
+pub use scanner::{ScanOptions, ScanResult, Scanner, IrSensor, Ping};
 pub use time::SpinTimer;
 pub use uartcom::UartCom;
 
 static CYBOT: CriticalOnce<CyBot> = CriticalOnce::new();
 
 pub struct CyBot {
+    pub(crate) adc0: Mutex<ADC0>,
+    pub(crate) timer3: Mutex<TIMER3>,
     pub(crate) uart1: Mutex<UART1>,
     pub(crate) uart4: Mutex<UART4>,
     pub(crate) gpiob: Mutex<GPIO_PORTB>,
@@ -92,6 +95,8 @@ fn get_cybot() -> &'static CyBot {
             let perp = hal::Peripherals::take().unwrap();
 
             CyBot {
+                adc0: Mutex::new(perp.ADC0),
+                timer3: Mutex::new(perp.TIMER3),
                 uart1: Mutex::new(perp.UART1),
                 uart4: Mutex::new(perp.UART4),
                 gpiob: Mutex::new(perp.GPIO_PORTB),

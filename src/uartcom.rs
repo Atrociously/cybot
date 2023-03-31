@@ -66,6 +66,10 @@ impl UartCom {
             sysctl.rcgcgpio.modify(|_, w| w.r1().set_bit()); // enable gpio b
             sysctl.rcgcuart.modify(|_, w| w.r1().set_bit()); // enable uart 1
 
+            // wait for ready
+            while sysctl.pruart.read().r1().bit_is_clear() {}
+            while sysctl.prgpio.read().r1().bit_is_clear() {}
+
             gpio.afsel
                 .modify(|r, w| unsafe { w.bits(r.bits() | BIT0 | BIT1) }); // set alternate function
                                                                            // set port control to uart1 for each gpio pin see page 1351 of datasheet for mappings
@@ -183,15 +187,14 @@ impl UartCom {
     /// Any char that is more than one byte of representation is ignored
     /// and will return None
     pub fn tryc(&mut self) -> Option<char> {
-        cortex_m::interrupt::free(|cs| {
+        let next = cortex_m::interrupt::free(|cs| {
             let mut buf = UARTBUF.borrow_mut(cs);
-            let next = buf.pop_front();
-
-            next.and_then(|b| {
-                b.is_ascii()
-                    .then(|| char::from_u32(b.into()))
-                    .flatten()
-            })
+            buf.pop_front()
+        });
+        next.and_then(|b| {
+            b.is_ascii()
+                .then(|| char::from_u32(b.into()))
+                .flatten()
         })
     }
 

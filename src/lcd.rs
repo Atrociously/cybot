@@ -47,6 +47,9 @@ impl Lcd {
             .rcgcgpio
             .modify(|_, w| w.r3().set_bit().r5().set_bit());
 
+        // wait for ready
+        while sysctl.prgpio.read().r3().bit_is_clear() {}
+
         data.dir.write(|w| unsafe { w.bits(0x1E) });
         data.den.write(|w| unsafe { w.bits(0x1E) });
 

@@ -3,18 +3,29 @@ name = "cybot"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
+[workspace]
+members = ["maskcs"]
+
+[workspace.dependencies]
 # this is important to get embedded alloc to link properly the critical-section-single-core feature must be enabled
-cortex-m = { version = "0.6" } #features = ["critical-section-single-core"] }
+cortex-m = "0.6"
 # export the runtime library that matches the version of the coretex-m library we use
-cortex-m-rt = { version = "0.6" }
+cortex-m-rt = "0.6"
 # the basic hardware abstraction layer for the tm4c123gh6pm
 tm4c123x-hal = { version = "0.10", features = ["rt"] }
+
+[dependencies]
+# this is important to get embedded alloc to link properly the critical-section-single-core feature must be enabled
+cortex-m = { workspace = true } #features = ["critical-section-single-core"] }
+# export the runtime library that matches the version of the coretex-m library we use
+cortex-m-rt = { workspace = true }
+# the basic hardware abstraction layer for the tm4c123gh6pm
+tm4c123x-hal = { workspace = true }
 # for allocating some stuff in memory
 embedded-alloc = "0.5"
 # for optimizing panic and oom handlers in release mode but having breakpoints in debug mode
 cfg-if = "1"
 # for math functions that are nice to have
 libm = "0.2"
-# for maintaining interrupt invariants
-spin = "0.9"
+# for fancy macro simplifications
+paste = "1"
