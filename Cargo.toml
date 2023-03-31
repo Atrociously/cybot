@@ -3,9 +3,6 @@ name = "cybot"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
-members = ["maskcs"]
-
 [workspace.dependencies]
 # this is important to get embedded alloc to link properly the critical-section-single-core feature must be enabled
 cortex-m = "0.6"
