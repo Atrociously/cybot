@@ -14,7 +14,7 @@
 //! }
 //! ```
 
-#![feature(once_cell, alloc_error_handler)]
+#![feature(once_cell)]
 #![deny(
     clippy::cast_lossless,
     clippy::cast_possible_wrap,
@@ -22,7 +22,7 @@
 )]
 #![no_std]
 
-extern crate alloc;
+//extern crate alloc;
 pub extern crate libm;
 
 use hal::tm4c123x::TIMER3;
@@ -36,12 +36,13 @@ use cortex_m::{interrupt::Mutex, peripheral::NVIC};
 pub use cortex_m_rt::entry;
 
 use cfg_if::cfg_if;
-
+/*
 use alloc::alloc::Layout;
-use core::{panic::PanicInfo, mem::MaybeUninit};
-use util::{CriticalCell, CriticalOnce};
-
+use core::mem::MaybeUninit;
 use embedded_alloc::Heap;
+*/
+use core::panic::PanicInfo;
+use util::{CriticalCell, CriticalOnce};
 
 mod util;
 
@@ -62,10 +63,12 @@ pub use scanner::{ScanOptions, ScanResult, Scanner, IrSensor, Ping};
 pub use time::SpinTimer;
 pub use uartcom::UartCom;
 
+/*
 const HEAP_SIZE: usize = 4096;
 static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
+*/
 
 static CYBOT: CriticalOnce<CyBot> = CriticalOnce::new();
 
@@ -87,7 +90,7 @@ fn get_cybot() -> &'static CyBot {
     cortex_m::interrupt::free(|cs| {
         CYBOT.get_or_init(cs, || {
             // initialize heap once
-            unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+            //unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
             
 
             let core = hal::CorePeripherals::take().unwrap();
@@ -110,6 +113,7 @@ fn get_cybot() -> &'static CyBot {
     })
 }
 
+/*
 #[alloc_error_handler]
 #[allow(clippy::empty_loop)]
 fn oom(_: Layout) -> ! {
@@ -122,6 +126,7 @@ fn oom(_: Layout) -> ! {
         }
     }
 }
+*/
 
 #[panic_handler]
 fn panic(_: &PanicInfo) -> ! {
