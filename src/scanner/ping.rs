@@ -21,11 +21,11 @@ impl PingState {
         matches!(self, Self::Done(..))
     }
 
-    fn as_done(self) -> u32 {
+    fn as_done(self) -> Option<u32> {
         if let Self::Done(v) = self {
-            v
+            Some(v)
         } else {
-            panic!("cast to done when not done")
+            None
         }
     }
 }
@@ -63,11 +63,14 @@ impl Ping {
             timer.ctl.modify(|_, w| w.tben().clear_bit());
 
             timer.cfg.modify(|_, w| unsafe { w.bits(0x4) }); // setup timers as 16-bit
-            timer.tbmr.modify(|_, w| w.tbcmr().set_bit()); // setup timer for capture mode
-            
+            timer.tbmr.modify(|_, w| w.tbcmr().set_bit().tbcdir().clear_bit().tbmr().cap()); // setup timer for capture mode countdown
+            // setup prescaler
+            timer.tbpr.modify(|_, w| unsafe { w.bits(0xFF) });
+            timer.tbilr.modify(|_, w| unsafe { w.bits(0xFFFF) });
+
             unsafe { NVIC::unmask(interrupt::TIMER3B) }; // enable interrupts for timer3
             timer.icr.write(|w| w.cbmcint().set_bit().cbecint().set_bit()); // clear interrupts
-            timer.imr.modify(|_, w| w.cbmim().clear_bit().cbeim().clear_bit()); // enable interupts
+            timer.imr.modify(|_, w| w.cbeim().set_bit()); // enable interupts
             Some(ping)
         })
     }
@@ -90,7 +93,7 @@ impl Ping {
             SpinTimer.wait_micros(2);
             gpio.data.modify(|r, w| unsafe { w.bits(r.bits() | !BIT3)});
 
-            timer.icr.write(|w| w.cbecint().set_bit()); // clear erroneous interrupt
+            timer.icr.write(|w| w.cbecint().set_bit()); // clear any possible erroneous interrupt
             gpio.afsel.modify(|r, w| unsafe { w.bits(r.bits() | BIT3) }); // enable alternate fn
             timer.imr.modify(|_, w| w.cbeim().set_bit()); // enable interrupts on timer
             timer.ctl.modify(|_, w| w.tben().set_bit()); // enable timer
@@ -100,7 +103,7 @@ impl Ping {
     pub fn get_distance(&self) -> Distance {
         self.ping_trigger();
         while !matches!(STATE.read(), PingState::Done(..)) {}
-        let value = STATE.read().as_done();
+        let value = STATE.read().as_done().unwrap();
         cortex_m::interrupt::free(|cs| {
             let mut state = STATE.borrow_mut(cs);
             *state = PingState::Low;
@@ -116,8 +119,8 @@ fn TIMER3B() {
     let cy = get_cybot();
     cortex_m::interrupt::free(|cs| {
         let timer = cy.timer3.borrow(cs);
-
-        if timer.ris.read().cberis().bit_is_set() {
+        if timer.mis.read().cbemis().bit_is_set() {
+            timer.icr.write(|w| w.cbecint().set_bit()); // clear the interrupt
         }
     });
 }
