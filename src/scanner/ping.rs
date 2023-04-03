@@ -8,8 +8,9 @@ use crate::{get_cybot, bits::*, SpinTimer};
 #[derive(Clone, Copy)]
 enum PingState {
     Low,
-    High,
+    High(u32), // timer start time
     Done(u32), // number of ticks between lows
+    Overflow(usize, u32), // number of overlows, timer value
 }
 
 impl PingState {
@@ -102,7 +103,8 @@ impl Ping {
 
     pub fn get_distance(&self) -> Distance {
         self.ping_trigger();
-        while !matches!(STATE.read(), PingState::Done(..)) {}
+
+        while !matches!(STATE.read(), PingState::Done(..) | PingState::Overflow(..)) {}
         let value = STATE.read().as_done().unwrap();
         cortex_m::interrupt::free(|cs| {
             let mut state = STATE.borrow_mut(cs);
@@ -121,6 +123,20 @@ fn TIMER3B() {
         let timer = cy.timer3.borrow(cs);
         if timer.mis.read().cbemis().bit_is_set() {
             timer.icr.write(|w| w.cbecint().set_bit()); // clear the interrupt
+        
+            let prescale: u32 = timer.tbpr.read().tbpsr().bits().into();
+            let prescale = prescale << 16;
+            if matches!(STATE.read(), PingState::Low) {
+                let mut state = STATE.borrow_mut(cs);
+                *state = PingState::High(prescale | timer.tbv.read().bits());
+                return;
+            }
+            if let PingState::High(start) = STATE.read() {
+                let end = timer.tbv.read().bits();
+                let end = prescale | end;
+                let mut state = STATE.borrow_mut(cs);
+                *state = PingState::Done(start - end);
+            }
         }
     });
 }
