@@ -89,7 +89,21 @@ impl Scanner {
     /// If the motor is not enabled the scan will still happen
     /// but the motor will not move to the specified angle
     pub fn scan(&mut self, angle: Angle, opts: ScanOptions) -> ScanResult {
-        todo!("{angle:?} {opts:?}")
+        let mut returnval = ScanResult {
+            sound_dist: -1.0,
+            ir_raw_val: -1,
+        };
+        if opts.motor {
+            
+        }
+        if opts.ir {
+            let ir = IrSensor::take().unwrap();
+            ir.get_distance();
+            returnval.ir_raw_val = i32::from(ir.get_raw_value());
+        }
+        if opts.ping {
+        }
+        returnval
     }
 }
 
