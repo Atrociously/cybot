@@ -14,7 +14,6 @@
 //! }
 //! ```
 
-#![feature(once_cell)]
 #![deny(
     clippy::cast_lossless,
     clippy::cast_possible_wrap,
@@ -36,20 +35,15 @@ use cortex_m::{interrupt::Mutex, peripheral::NVIC};
 pub use cortex_m_rt::entry;
 
 use cfg_if::cfg_if;
-
-//use alloc::alloc::Layout;
-//use core::mem::MaybeUninit;
+/*
+use alloc::alloc::Layout;
+use core::mem::MaybeUninit;
+use embedded_alloc::Heap;
+*/
 use core::panic::PanicInfo;
 use util::{CriticalCell, CriticalOnce};
 
-//use embedded_alloc::Heap;
-
 mod util;
-
-//#[global_allocator]
-//static HEAP: Heap = Heap::empty();
-//const HEAP_SIZE: usize = 4096;
-//static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
 mod bits;
 mod buttons;
@@ -67,6 +61,13 @@ pub use open_interface::{charging, OiMode, OpenInterface, Stasis};
 pub use scanner::{ScanOptions, ScanResult, Scanner, IrSensor, Ping};
 pub use time::SpinTimer;
 pub use uartcom::UartCom;
+
+/*
+const HEAP_SIZE: usize = 4096;
+static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+*/
 
 static CYBOT: CriticalOnce<CyBot> = CriticalOnce::new();
 
@@ -110,6 +111,7 @@ fn get_cybot() -> &'static CyBot {
         })
     })
 }
+
 /*
 #[alloc_error_handler]
 #[allow(clippy::empty_loop)]

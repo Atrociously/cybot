@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["maskcs"]
+#members = ["maskcs"]
 
 [workspace.dependencies]
 # this is important to get embedded alloc to link properly the critical-section-single-core feature must be enabled
