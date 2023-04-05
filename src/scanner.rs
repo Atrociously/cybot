@@ -5,6 +5,7 @@ mod ping;
 
 pub use infrared::IrSensor;
 pub use ping::Ping;
+//pub use servo::Servo;
 
 use crate::{
     get_cybot,

@@ -59,6 +59,7 @@ impl Ping {
             // setup gpio for digital output when we need to trigger the start pulse
             gpiob.den.modify(|r, w| unsafe { w.bits(r.bits() | BIT3) });
             gpiob.dir.modify(|r, w| unsafe { w.bits(r.bits() | BIT3) });
+            gpiob.pctl.modify(|r, w| unsafe {w.bits(r.bits() | 0x7000)});
 
             // disable timer for setup
             timer.ctl.modify(|_, w| w.tben().clear_bit());
@@ -66,10 +67,14 @@ impl Ping {
             timer.cfg.modify(|_, w| unsafe { w.bits(0x4) }); // setup timers as 16-bit
             timer.tbmr.modify(|_, w| w.tbcmr().set_bit().tbcdir().clear_bit().tbmr().cap()); // setup timer for capture mode countdown
             // setup prescaler
+            timer.ctl.modify(|_, w| w.tbevent().both());
             timer.tbpr.modify(|_, w| unsafe { w.bits(0xFF) });
             timer.tbilr.modify(|_, w| unsafe { w.bits(0xFFFF) });
 
-            unsafe { NVIC::unmask(interrupt::TIMER3B) }; // enable interrupts for timer3
+            let mut nvic = cy.nvic.borrow_mut(cs);
+            unsafe { NVIC::unmask(interrupt::TIMER3B);
+                nvic.set_priority(interrupt::TIMER3B, 1);
+            }; // enable interrupts for timer3
             timer.icr.write(|w| w.cbmcint().set_bit().cbecint().set_bit()); // clear interrupts
             timer.imr.modify(|_, w| w.cbeim().set_bit()); // enable interupts
             Some(ping)
