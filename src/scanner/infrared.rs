@@ -58,12 +58,11 @@ impl IrSensor {
     }
 
     pub fn get_distance(&self) -> Distance {
-        const MAGIC_N: f32 = -1.2006;
-        const MAGIC_M: f32 = 134_078.23;
+        const MAGIC_N: f32 = -1.2006; // -1.218
+        const MAGIC_M: f32 = 134_078.23; // 5.8855
 
         let raw_value = f32::from(self.get_raw_value());
         let cm = MAGIC_M * libm::powf(raw_value, MAGIC_N);
-        //let cm = MAGIC_M * libm::logf(raw_value) + MAGIC_N;
         Distance::from_cm(cm)
     }
 }

@@ -133,6 +133,7 @@ impl Ping {
 
 #[interrupt]
 fn TIMER3B() {
+    #[allow(non_upper_case_globals)]
     static mut start_val: u32 = 0;
 
     let cy = get_cybot();

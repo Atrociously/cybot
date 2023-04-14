@@ -1,80 +1,39 @@
-use core::ops::RangeInclusive;
+use core::sync::atomic::{AtomicBool, Ordering};
 
 mod infrared;
 mod ping;
+mod servo;
 
 pub use infrared::IrSensor;
 pub use ping::Ping;
+pub use servo::Servo;
 
-use crate::{
-    get_cybot,
-    measure::{Angle, Distance},
-};
+use crate::measure::{Angle, Distance};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ScanResult {
-    pub sound_dist: f32,
-    pub ir_raw_val: i32,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ScanOptions {
-    pub motor: bool,
-    pub ping: bool,
-    pub ir: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Extent {
-    left: u32,
-    right: u32,
+    pub sound_dist: Distance,
+    pub ir_dist: Distance,
 }
 
 pub struct Scanner {
-    extents: Extent,
-    // TODO: fill out
+    ir: IrSensor,
+    ping: Ping,
+    servo: Servo,
 }
 
-static mut SCANNER: Option<Scanner> = Some(Scanner {
-    extents: Extent {
-        left: 2_000_000,
-        right: 300_000,
-    },
-});
+static TAKEN: AtomicBool = AtomicBool::new(false);
 
 impl Scanner {
     pub fn take() -> Option<Self> {
-        let cybot = get_cybot();
-        let scanner = cortex_m::interrupt::free(|_| unsafe { SCANNER.take() })?;
-
-        cortex_m::interrupt::free(|cs| {
-            let sysctl = cybot.sysctl.borrow(cs);
-            //let gpiob = cybot.gpiob.borrow(cs);
-
-            sysctl.rcgcgpio.modify(|_, w| w.r1().set_bit()); // enable clocks for port but
-
-            // TODO: complete scanner setup
-        });
-        Some(scanner)
-    }
-
-    /// Set the left extent
-    ///
-    /// For scanning purposes the left extent is defined as 180 degrees
-    pub fn set_extent_left(&mut self, extent: u32) {
-        self.extents.left = extent;
-    }
-
-    /// Set the right extent
-    ///
-    /// For scanning purposes the right extent is defined as 0 degrees.
-    pub fn set_extent_right(&mut self, extent: u32) {
-        self.extents.right = extent;
-    }
-
-    /// Returns the current left and right extents
-    pub fn get_extents(&self) -> Extent {
-        self.extents
+        if TAKEN.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |_| Some(true)) == Ok(true) {
+            return None;
+        }
+        Some(Scanner {
+            ir: IrSensor::take()?,
+            ping: Ping::take()?,
+            servo: Servo::take()?,
+        })
     }
 
     /// Run the calibration program to set left and right extents manually
@@ -88,44 +47,14 @@ impl Scanner {
     ///
     /// If the motor is not enabled the scan will still happen
     /// but the motor will not move to the specified angle
-    pub fn scan(&mut self, angle: Angle, opts: ScanOptions) -> ScanResult {
-        todo!("{angle:?} {opts:?}")
+    pub fn scan(&mut self, angle: Angle) -> ScanResult {
+        self.servo.move_to(angle.as_deg());
+        let sound_dist = self.ping.get_distance();
+        let ir_dist = self.ir.get_distance();
+
+        ScanResult {
+            sound_dist,
+            ir_dist,
+        }
     }
-}
-
-#[allow(dead_code)]
-fn convert_ir(raw: i32) -> Option<Distance> {
-    const INPUT_RANGE: RangeInclusive<f32> = 0.0..=4096.0;
-    const VOLTAGE_RANGE: RangeInclusive<f32> = 0.0..=3.3;
-    const INPUT_VOLTAGE_RANGE: RangeInclusive<f32> = 0.4..=2.6;
-    const INV_DIST_RANGE: RangeInclusive<f32> = 0.012..=0.111;
-
-    // if the raw data does not fit in an i16 it is out of range anyways
-    let raw = i16::try_from(raw).ok()?;
-    let raw: f32 = f32::from(raw);
-
-    fn convert_value(v: f32, input: &RangeInclusive<f32>, output: &RangeInclusive<f32>) -> f32 {
-        let factor = (output.end() - output.start()) / (input.end() - input.start());
-        output.start() + factor * (v - input.start())
-    }
-
-    // if the value is outside the valid input range
-    // we cannot compute a proper value so abort
-    if !INPUT_RANGE.contains(&raw) {
-        return None;
-    }
-
-    let voltage_val = convert_value(raw, &INPUT_RANGE, &VOLTAGE_RANGE);
-
-    // if the voltage is outside the valid input range of the sensor
-    // we cannot compute a proper value, or the data is out of range
-    // anyways so abort
-    if !INPUT_VOLTAGE_RANGE.contains(&voltage_val) {
-        return None;
-    }
-
-    let inv_dist_val = convert_value(voltage_val, &INPUT_VOLTAGE_RANGE, &INV_DIST_RANGE);
-
-    let distance = inv_dist_val.recip() - 0.42;
-    Some(Distance::from_cm(distance))
 }

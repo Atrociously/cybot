@@ -1,5 +1,4 @@
 use crate::{bits::*, get_cybot, util::CriticalCell};
-//use alloc::collections::VecDeque;
 use cortex_m::peripheral::NVIC;
 use tm4c123x_hal::interrupt;
 
@@ -47,7 +46,7 @@ impl<const N: usize> StackQueue<N> {
     }
 }
 
-static UARTBUF: CriticalCell<StackQueue<10>> = CriticalCell::new(StackQueue::new());
+static UARTBUF: CriticalCell<StackQueue<32>> = CriticalCell::new(StackQueue::new());
 static mut UARTCOM: Option<UartCom> = Some(UartCom(()));
 
 impl UartCom {
@@ -134,7 +133,7 @@ impl UartCom {
         })
     }
 
-    fn uart_send(&self, data: u8) {
+    pub fn uart_send(&self, data: u8) {
         cortex_m::interrupt::free(|cs| {
             let uart = get_cybot().uart1.borrow(cs);
             // holds until no data in transmit buffer
@@ -144,7 +143,7 @@ impl UartCom {
         });
     }
 
-    fn uart_recieve(&self) -> u8 {
+    pub fn uart_recieve(&self) -> u8 {
         cortex_m::interrupt::free(|cs| {
             let uart = get_cybot().uart1.borrow(cs);
             // hold until data is recieved
