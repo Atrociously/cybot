@@ -208,6 +208,13 @@ impl UartCom {
     }
 }
 
+impl core::fmt::Write for UartCom {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.puts(s);
+        Ok(())
+    }
+}
+
 /// The blocking iterator will block on each call to next
 /// waiting for a new char to enter the uart it will
 /// return None if the uart recieves a byte that is not

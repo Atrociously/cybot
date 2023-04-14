@@ -7,7 +7,7 @@ use crate::{get_cybot, bits::*, SpinTimer};
 #[derive(Clone, Copy)]
 enum PingState {
     Low,
-    High,
+    High, // timer start time
     Done(u32), // number of ticks between lows
 }
 
@@ -28,11 +28,11 @@ impl PingState {
         matches!(self, Self::High)
     }
 
-    fn as_done(self) -> u32 {
+    fn as_done(self) -> Option<u32> {
         if let Self::Done(v) = self {
-            v
+            Some(v)
         } else {
-            panic!("cast to done when not done")
+            None
         }
     }
 }
@@ -103,7 +103,7 @@ impl Ping {
             SpinTimer.wait_micros(2);
             gpio.data.modify(|r, w| unsafe { w.bits(r.bits() & !BIT3)});
 
-            timer.icr.write(|w| w.cbecint().set_bit()); // clear erroneous interrupt
+            timer.icr.write(|w| w.cbecint().set_bit()); // clear any possible erroneous interrupt
             gpio.afsel.modify(|r, w| unsafe { w.bits(r.bits() | BIT3) }); // enable alternate fn
             timer.imr.modify(|_, w| w.cbeim().set_bit()); // enable interrupts on timer
             timer.ctl.modify(|_, w| w.tben().set_bit()); // enable timer
@@ -114,7 +114,7 @@ impl Ping {
         self.ping_trigger();
         let value = {
             while unsafe { !STATE.is_done() } { }
-            unsafe { STATE.as_done() }
+            unsafe { STATE.as_done().unwrap() }
         };
         cortex_m::interrupt::free(|cs| {
             unsafe { STATE = PingState::Low };
